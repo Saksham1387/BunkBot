@@ -24,8 +24,9 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const middleware_1 = require("./middleware");
 const web3_js_2 = require("@solana/web3.js");
+const axios_1 = __importDefault(require("axios"));
 exports.prisma = new client_1.PrismaClient();
-const connection = new web3_js_2.Connection((0, web3_js_2.clusterApiUrl)("devnet"), "confirmed");
+const connection = new web3_js_2.Connection('https://api.mainnet-beta.solana.com');
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 exports.JWT_SECRET = "secret";
@@ -204,6 +205,80 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
         res.status(200).json({ message: "withdrawl done !" });
     }
 }));
+app.post("/api/v1/getPrice", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const token_address = req.body.token_address;
+    const price = yield axios_1.default.get(`https://api.jup.ag/price/v2?ids=${token_address},So11111111111111111111111111111111111111112`);
+    const extra = yield axios_1.default.get(`https://tokens.jup.ag/token/${token_address}`);
+    const quoteResponse = yield fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${1 * web3_js_2.LAMPORTS_PER_SOL}\&slippageBps=50`);
+    const data = yield quoteResponse.json();
+    res.status(200).json({
+        token_price: price.data.data[token_address],
+        quote: data,
+        extra_info: extra.data,
+    });
+}));
 app.post("/api/v1/buy", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const token_address = req.body.token_address;
+    const amount = req.body.amount;
+    const finalAmount = amount * web3_js_2.LAMPORTS_PER_SOL;
+    const quoteResponse = yield (yield fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`)).json();
+    // const data = await quoteResponse.json();
+    //@ts-ignore
+    const userid = req.user.id;
+    const user = yield exports.prisma.user.findUnique({
+        where: {
+            id: userid,
+        },
+    });
+    if (!user) {
+        res.status(404).json({ message: "user not found" });
+        return;
+    }
+    const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
+    const keypair = web3_js_1.Keypair.fromSecretKey(secretKey);
+    const { swapTransaction } = yield (yield fetch("https://quote-api.jup.ag/v6/swap", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            // quoteResponse from /quote api
+            quoteResponse,
+            // user public key to be used for the swap
+            userPublicKey: user === null || user === void 0 ? void 0 : user.publicKey.toString(),
+            // auto wrap and unwrap SOL. default is true
+            wrapAndUnwrapSol: true,
+            // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
+            // feeAccount: "fee_account_public_key"
+        }),
+    })).json();
+    /// ---------------------------
+    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
+    if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
+        console.error('Invalid swap transaction');
+        res.status(500).json({ error: 'Failed to process swap transaction' });
+        return;
+    }
+    var transaction = web3_js_1.VersionedTransaction.deserialize(swapTransactionBuf);
+    console.log(transaction);
+    transaction.sign([keypair]);
+    const latestBlockHash = yield connection.getLatestBlockhash();
+    const rawTransaction = transaction.serialize();
+    const txid = yield connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: true,
+        maxRetries: 2,
+    });
+    console.log("Awaiting for trnsaciton confirm");
+    connection.confirmTransaction({
+        blockhash: latestBlockHash.blockhash,
+        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+        signature: txid,
+    });
+    console.log(`https://solscan.io/tx/${txid}`);
+    res.status(200).json({
+        message: "Transaction initiated",
+        tsxid: txid,
+        url: `https://solscan.io/tx/${txid}`
+    });
 }));
 app.listen(3000);

@@ -3,6 +3,7 @@ import {
   sendAndConfirmTransaction,
   SystemProgram,
   Transaction,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import express from "express";
 import { mnemonicToSeed } from "bip39";
@@ -19,9 +20,10 @@ import {
   PublicKey,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
+import axios from "axios";
 
 export const prisma = new PrismaClient();
-const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+const connection = new Connection('https://api.mainnet-beta.solana.com');
 
 const app = express();
 app.use(express.json());
@@ -188,13 +190,13 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
     const lamports = await connection.getBalance(new PublicKey(user.publicKey));
 
     // 5k lamports is the fees of a transfer transaction
-    const lamportsAfterfees = lamports - 5000
+    const lamportsAfterfees = lamports - 5000;
     if (all) {
       const transactionWidthdrawAll = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: new PublicKey(user.publicKey),
           toPubkey: new PublicKey(address),
-          lamports: lamportsAfterfees  ,
+          lamports: lamportsAfterfees,
         })
       );
       const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
@@ -222,12 +224,94 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
   }
 });
 
-app.post("/api/v1/buy",authMiddleware, async (req,res) =>{
-  
-})
+app.post("/api/v1/getPrice", authMiddleware, async (req, res) => {
+  const token_address = req.body.token_address;
+
+  const price = await axios.get(
+    `https://api.jup.ag/price/v2?ids=${token_address},So11111111111111111111111111111111111111112`
+  );
+  const extra = await axios.get(`https://tokens.jup.ag/token/${token_address}`);
+  const quoteResponse = await fetch(
+    `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${
+      1 * LAMPORTS_PER_SOL
+    }\&slippageBps=50`
+  );
+  const data = await quoteResponse.json();
+  res.status(200).json({
+    token_price: price.data.data[token_address],
+    quote: data,
+    extra_info: extra.data,
+  });
+});
+
+app.post("/api/v1/buy", authMiddleware, async (req, res) => {
+  const token_address = req.body.token_address;
+  const amount = req.body.amount;
+  const finalAmount = amount * LAMPORTS_PER_SOL;
+  const quoteResponse = await (await fetch(
+    `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`
+  )).json()
+  // const data = await quoteResponse.json();
+  //@ts-ignore
+  const userid = req.user.id;
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userid,
+    },
+  });
+  if(!user){
+    res.status(404).json({message:"user not found"})
+    return
+  }
+  const secretKey = new Uint8Array(Buffer.from(user!.privateKey, "hex"));
+  const keypair = Keypair.fromSecretKey(secretKey);
+  const {swapTransaction}  = await (await fetch("https://quote-api.jup.ag/v6/swap", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        // quoteResponse from /quote api
+        quoteResponse,
+        // user public key to be used for the swap
+        userPublicKey: user?.publicKey.toString(),
+        // auto wrap and unwrap SOL. default is true
+        wrapAndUnwrapSol: true,
+        // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
+        // feeAccount: "fee_account_public_key"
+      }),
+    })).json()
+/// ---------------------------
+  const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
+  if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
+    console.error('Invalid swap transaction');
+    res.status(500).json({ error: 'Failed to process swap transaction' });
+    return 
+  }
+  var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+  console.log(transaction);
 
 
+  transaction.sign([keypair]);
+  const latestBlockHash = await connection.getLatestBlockhash();
+  const rawTransaction = transaction.serialize();
+  const txid = await connection.sendRawTransaction(rawTransaction, {
+    skipPreflight: true,
+    maxRetries: 2,
+  });
+  console.log("Awaiting for trnsaciton confirm")
+  connection.confirmTransaction({
+    blockhash: latestBlockHash.blockhash,
+    lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+    signature: txid,
+  });
+  console.log(`https://solscan.io/tx/${txid}`);
 
-
+  res.status(200).json({
+    message: "Transaction initiated",
+    tsxid:txid,
+    url:`https://solscan.io/tx/${txid}`
+  });
+});
 
 app.listen(3000);
