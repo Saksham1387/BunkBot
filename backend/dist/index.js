@@ -281,4 +281,9 @@ app.post("/api/v1/buy", middleware_1.authMiddleware, (req, res) => __awaiter(voi
         url: `https://solscan.io/tx/${txid}`
     });
 }));
+app.post("/api/v1/health", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    res.status(200).json({
+        message: "healthy"
+    });
+}));
 app.listen(3000);

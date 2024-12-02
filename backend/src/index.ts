@@ -314,4 +314,10 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
   });
 });
 
+app.post("/api/v1/health", authMiddleware, async (req, res) => {
+ res.status(200).json({
+  message:"healthy"
+ })
+});
+
 app.listen(3000);
