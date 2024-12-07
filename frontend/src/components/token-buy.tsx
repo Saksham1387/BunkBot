@@ -1,22 +1,40 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import axios from "axios";
+import { Copy } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+
+interface TokenDetails {
+  extra_info: {
+    logoURI: string;
+    name: string;
+    symbol: string;
+    daily_volume: number;
+    // Add other properties as needed
+  };
+  token_price: {
+    price: number;
+  };
+  // Add other properties of tokenDetails if any
+}
 
 export const TokenPurchaseComponent = () => {
   const [tokenAddress, setTokenAddress] = useState("");
-  const [tokenDetails, setTokenDetails] = useState(null);
-  const [purchaseAmount, setPurchaseAmount] = useState("");
+  const [tokenDetails, setTokenDetails] = useState<TokenDetails | null>(null);
+  const [purchaseAmount, setPurchaseAmount] = useState(0);
   const [error, setError] = useState(null);
-
-  const handleGetPrice = async () => {
+  const [isTransaction, setIsTransaction] = useState(false);
+  const url = useRef("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _handleGetPrice = async () => {
     setError(null);
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-       `${process.env.NEXT_PUBLIC_URL}/api/v1/getPrice`,
+        `${process.env.NEXT_PUBLIC_URL}/api/v1/getPrice`,
         {
           token_address: tokenAddress,
           headers: {
@@ -28,36 +46,48 @@ export const TokenPurchaseComponent = () => {
       const data1 = response.data;
       setTokenDetails(data1);
       console.log(data1);
-    } catch (err) {
-      console.log(err);
-      setError(err.response.data.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        console.log(err);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setError(err as any);
+      } else if (err && typeof err === "object" && "response" in err) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setError((err as any).response.data.message);
+      }
     }
   };
 
-  const handleBuyToken = async (actionType) => {
-    setError(null);
-    try {
-      if (!tokenAddress) {
-        return;
-      }
-
-      const result = await handleTokenPurchase(
-        tokenAddress,
-        actionType === "buy"
-          ? purchaseAmount
-          : actionType === "directPurchase1Sol"
-          ? 1
-          : 0.1,
-        actionType
-      );
-
-      if (result) {
-        // Handle successful purchase
-        alert("Purchase successful!");
-      }
-    } catch (err) {
-      setError(err.message);
+  const handleBuyToken = async (actionType: string) => {
+    setIsTransaction(true);
+    const token = localStorage.getItem("token");
+    let realAmounttoBuy = 0;
+    if (actionType == "buy") {
+      realAmounttoBuy = purchaseAmount;
     }
+    if (actionType == "directPurchase1Sol") {
+      realAmounttoBuy = 1;
+    }
+    if (actionType == "directPurchase0.1Sol") {
+      realAmounttoBuy = 0.1;
+    }
+    const res = await axios.post(
+      `${process.env.NEXT_PUBLIC_URL}/api/v1/buy`,
+      {
+        token_address: tokenAddress,
+        amount: realAmounttoBuy,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    if (res.status == 200) {
+      setIsTransaction(false);
+      url.current = res.data.url;
+    }
+    setIsTransaction(false);
   };
 
   return (
@@ -77,7 +107,7 @@ export const TokenPurchaseComponent = () => {
             />
             <Button
               className="bg-zinc-800 hover:bg-zinc-700"
-              onClick={handleGetPrice}
+              onClick={_handleGetPrice}
             >
               Get Price
             </Button>
@@ -105,30 +135,62 @@ export const TokenPurchaseComponent = () => {
                 <Input
                   type="number"
                   placeholder="Enter SOL Amount"
-                  value={purchaseAmount}
+                  value={purchaseAmount || ""}
                   className="border-none bg-zinc-800"
-                  onChange={(e) => setPurchaseAmount(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPurchaseAmount(value === "" ? 0 : Number(value));
+                  }}
                 />
 
-                <div className="flex space-x-2">
-                  <Button
-                    onClick={() => handleBuyToken("buy")}
-                    className="flex-grow bg-zinc-800"
-                  >
-                    Buy with Custom Amount
-                  </Button>
-                  <Button
-                    onClick={() => handleBuyToken("directPurchase1Sol")}
-                    variant="secondary"
-                  >
-                    Buy 1 SOL
-                  </Button>
-                  <Button
-                    onClick={() => handleBuyToken("directPurchase0.1Sol")}
-                    variant="secondary"
-                  >
-                    Buy 0.1 SOL
-                  </Button>
+                <div className="flex space-x-2 flex-col">
+                  {isTransaction ? (
+                    "Transaction ongoing"
+                  ) : (
+                    <div className="flex flex-row gap-3">
+                      <Button
+                        onClick={() => handleBuyToken("buy")}
+                        className="flex-grow bg-zinc-800"
+                      >
+                        Buy with Custom Amount
+                      </Button>
+                      <Button
+                        onClick={() => handleBuyToken("directPurchase1Sol")}
+                        variant="secondary"
+                      >
+                        Buy 1 SOL
+                      </Button>
+                      <Button
+                        onClick={() => handleBuyToken("directPurchase0.1Sol")}
+                        variant="secondary"
+                      >
+                        Buy 0.1 SOL
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex items-center space-x-3">
+                    <p className="w-80 overflow-hidden">
+                      Last Transaction URL: {url.current || "No URL available"}
+                    </p>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard
+                          .writeText(url.current || "No URL available")
+                          .then(() => {
+                            toast({
+                              title: "Copied!",
+                            });
+                          })
+                          .catch((err) => {
+                            console.error("Failed to copy:", err);
+                          });
+                      }}
+                      className=" text-white"
+                    >
+                      <Copy className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

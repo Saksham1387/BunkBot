@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getWallet, getSeedAction } from "@/app/utils/api";
 import { NavBar } from "./nav-bar";
-import { X } from "lucide-react";
+import { Copy, X } from "lucide-react";
 import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
@@ -13,7 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { TokenPurchaseComponent } from "./token-buy";
 
 export default function Dashboard() {
-  const [result, setResult] = useState<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [result, setResult] = useState(null as any);
   const [actionType, setActionType] = useState<string | null>(null);
   const [isResultVisible, setIsResultVisible] = useState(false);
   const [isAllBalance, setIsAllBalance] = useState(false);
@@ -21,7 +22,18 @@ export default function Dashboard() {
   const [address, setAddress] = useState("");
   const [istransaction, setIstransaction] = useState(false);
   const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
 
+  const handleCopy = () => {
+    navigator.clipboard.writeText(result.privateKey).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset copied state after 2 seconds
+    });
+    toast({
+      title: "Copied !",
+    });
+    console.log(copied);
+  };
   const handleWithdraw = async () => {
     setIstransaction(true);
     const token = localStorage.getItem("token");
@@ -125,21 +137,28 @@ export default function Dashboard() {
 
   const renderResult = () => {
     if (!result) return null;
-    // Handle error case
+
     if (result.error) {
       return <p className="text-red-500">Error: {result.error}</p>;
     }
 
-    // Wallet info specific rendering
     if (actionType === "wallet-info" && typeof result === "object") {
       return (
         <div className="space-y-2">
           <p>
             <strong>Public Key:</strong> {result.publicKey}
           </p>
-          <p>
-            <strong>Private Key:</strong> {result.privateKey}
-          </p>
+          <div className="flex items-center ">
+            <strong>Private Key:</strong>
+            <p className="w-20 ml-2">
+              {result.privateKey.length > 10
+                ? result.privateKey.slice(0, 15) + "...."
+                : result.privateKey}
+            </p>
+            <button onClick={handleCopy} className=" text-white ml-20">
+              <Copy></Copy>
+            </button>
+          </div>
           <p>
             <strong>Balance:</strong> {result.balance}
           </p>
@@ -230,7 +249,7 @@ export default function Dashboard() {
         </div>
       );
     }
-    // Generic result rendering for other actions
+
     return (
       <div className="space-y-2">
         <p>

@@ -27,7 +27,7 @@ const web3_js_2 = require("@solana/web3.js");
 const axios_1 = __importDefault(require("axios"));
 const cors_1 = __importDefault(require("cors"));
 exports.prisma = new client_1.PrismaClient();
-const connection = new web3_js_2.Connection('https://api.devnet.solana.com');
+const connection = new web3_js_2.Connection("https://api.mainnet-beta.solana.com");
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use((0, cors_1.default)());
@@ -180,7 +180,7 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
         const lamports = yield connection.getBalance(new web3_js_2.PublicKey(user.publicKey));
         if (lamports == 0) {
             res.status(202).json({
-                message: "No Funds to Withdraw"
+                message: "No Funds to Withdraw",
             });
             return;
         }
@@ -216,7 +216,7 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
         // Added response for the partial withdrawal case
         res.status(200).json({
             message: "Partial withdrawal successful",
-            amount: amount
+            amount: amount,
         });
         return;
     }
@@ -237,80 +237,138 @@ app.post("/api/v1/getPrice", (req, res) => __awaiter(void 0, void 0, void 0, fun
     catch (error) {
         res.status(303).json({ message: "Enter the correct Token address" });
     }
-    // const quoteResponse = await fetch(
-    //   `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${
-    //     1 * LAMPORTS_PER_SOL
-    //   }\&slippageBps=50`
-    // );
-    // const data = await quoteResponse.json();
 }));
+// app.post("/api/v1/buy", authMiddleware, async (req, res) => {
+//   const token_address = req.body.token_address;
+//   const amount = req.body.amount;
+//   const finalAmount = amount * LAMPORTS_PER_SOL;
+//   const quoteResponse = await (
+//     await fetch(
+//       `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`
+//     )
+//   ).json();
+//   // const data = await quoteResponse.json();
+//   //@ts-ignore
+//   const userid = req.user.id;
+//   const user = await prisma.user.findUnique({
+//     where: {
+//       id: userid,
+//     },
+//   });
+//   if (!user) {
+//     res.status(404).json({ message: "user not found" });
+//     return;
+//   }
+//   const secretKey = new Uint8Array(Buffer.from(user!.privateKey, "hex"));
+//   const keypair = Keypair.fromSecretKey(secretKey);
+//   const { swapTransaction } = await (
+//     await fetch("https://quote-api.jup.ag/v6/swap", {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify({
+//         // quoteResponse from /quote api
+//         quoteResponse,
+//         // user public key to be used for the swap
+//         userPublicKey: user?.publicKey.toString(),
+//         // auto wrap and unwrap SOL. default is true
+//         wrapAndUnwrapSol: true,
+//         // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
+//         // feeAccount: "fee_account_public_key"
+//       }),
+//     })
+//   ).json();
+//   /// ---------------------------
+//   const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
+//   if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
+//     console.error("Invalid swap transaction");
+//     res.status(500).json({ error: "Failed to process swap transaction" });
+//     return;
+//   }
+//   var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
+//   console.log(transaction);
+//   transaction.sign([keypair]);
+//   const latestBlockHash = await connection.getLatestBlockhash();
+//   const rawTransaction = transaction.serialize();
+//   const txid = await connection.sendRawTransaction(rawTransaction, {
+//     skipPreflight: true,
+//     maxRetries: 2,
+//   });
+//   console.log("Awaiting for trnsaciton confirm");
+//   connection.confirmTransaction({
+//     blockhash: latestBlockHash.blockhash,
+//     lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+//     signature: txid,
+//   });
+//   console.log(`https://solscan.io/tx/${txid}`);
+//   res.status(200).json({
+//     message: "Transaction initiated",
+//     tsxid: txid,
+//     url: `https://solscan.io/tx/${txid}`,
+//   });
+//   return
+// });
 app.post("/api/v1/buy", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const token_address = req.body.token_address;
-    const amount = req.body.amount;
-    const finalAmount = amount * web3_js_2.LAMPORTS_PER_SOL;
-    const quoteResponse = yield (yield fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`)).json();
-    // const data = await quoteResponse.json();
-    //@ts-ignore
-    const userid = req.user.id;
-    const user = yield exports.prisma.user.findUnique({
-        where: {
-            id: userid,
-        },
-    });
-    if (!user) {
-        res.status(404).json({ message: "user not found" });
+    try {
+        const token_address = req.body.token_address;
+        const amount = req.body.amount;
+        const finalAmount = amount * web3_js_2.LAMPORTS_PER_SOL;
+        const quoteResponse = yield (yield fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`)).json();
+        //@ts-ignore
+        const userid = req.user.id;
+        const user = yield exports.prisma.user.findUnique({
+            where: {
+                id: userid,
+            },
+        });
+        if (!user) {
+            res.status(404).json({ message: "user not found" });
+            return;
+        }
+        const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
+        const keypair = web3_js_1.Keypair.fromSecretKey(secretKey);
+        const { swapTransaction } = yield (yield fetch("https://quote-api.jup.ag/v6/swap", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                quoteResponse,
+                userPublicKey: user === null || user === void 0 ? void 0 : user.publicKey.toString(),
+                wrapAndUnwrapSol: true,
+            }),
+        })).json();
+        const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
+        if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
+            res.status(500).json({ error: "Failed to process swap transaction" });
+            return;
+        }
+        var transaction = web3_js_1.VersionedTransaction.deserialize(swapTransactionBuf);
+        transaction.sign([keypair]);
+        const latestBlockHash = yield connection.getLatestBlockhash();
+        const rawTransaction = transaction.serialize();
+        const txid = yield connection.sendRawTransaction(rawTransaction, {
+            skipPreflight: true,
+            maxRetries: 2,
+        });
+        const url = `https://solscan.io/tx/${txid}`;
+        res.status(200).json({
+            message: "Transaction initiated",
+            txid: txid,
+            url: url,
+        });
         return;
     }
-    const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
-    const keypair = web3_js_1.Keypair.fromSecretKey(secretKey);
-    const { swapTransaction } = yield (yield fetch("https://quote-api.jup.ag/v6/swap", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            // quoteResponse from /quote api
-            quoteResponse,
-            // user public key to be used for the swap
-            userPublicKey: user === null || user === void 0 ? void 0 : user.publicKey.toString(),
-            // auto wrap and unwrap SOL. default is true
-            wrapAndUnwrapSol: true,
-            // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
-            // feeAccount: "fee_account_public_key"
-        }),
-    })).json();
-    /// ---------------------------
-    const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
-    if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
-        console.error('Invalid swap transaction');
-        res.status(500).json({ error: 'Failed to process swap transaction' });
+    catch (error) {
+        console.error("Error in buy endpoint:", error);
+        res.status(500).json({ error: "An unexpected error occurred" });
         return;
     }
-    var transaction = web3_js_1.VersionedTransaction.deserialize(swapTransactionBuf);
-    console.log(transaction);
-    transaction.sign([keypair]);
-    const latestBlockHash = yield connection.getLatestBlockhash();
-    const rawTransaction = transaction.serialize();
-    const txid = yield connection.sendRawTransaction(rawTransaction, {
-        skipPreflight: true,
-        maxRetries: 2,
-    });
-    console.log("Awaiting for trnsaciton confirm");
-    connection.confirmTransaction({
-        blockhash: latestBlockHash.blockhash,
-        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-        signature: txid,
-    });
-    console.log(`https://solscan.io/tx/${txid}`);
-    res.status(200).json({
-        message: "Transaction initiated",
-        tsxid: txid,
-        url: `https://solscan.io/tx/${txid}`
-    });
 }));
 app.post("/api/v1/health", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     res.status(200).json({
-        message: "healthy"
+        message: "healthy",
     });
 }));
 app.listen(5001);
