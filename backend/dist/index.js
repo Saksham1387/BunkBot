@@ -25,10 +25,12 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const middleware_1 = require("./middleware");
 const web3_js_2 = require("@solana/web3.js");
 const axios_1 = __importDefault(require("axios"));
+const cors_1 = __importDefault(require("cors"));
 exports.prisma = new client_1.PrismaClient();
-const connection = new web3_js_2.Connection('https://api.mainnet-beta.solana.com');
+const connection = new web3_js_2.Connection('https://api.devnet.solana.com');
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
+app.use((0, cors_1.default)());
 exports.JWT_SECRET = "secret";
 app.post("/api/v1/signup", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { username, password } = req.body;
@@ -68,7 +70,7 @@ app.post("/api/v1/signup", (req, res) => __awaiter(void 0, void 0, void 0, funct
         const token = jsonwebtoken_1.default.sign({ userId: user.id }, exports.JWT_SECRET, {
             expiresIn: "1h",
         });
-        res.status(201).json({
+        res.status(200).json({
             message: "User created successfully",
             token,
             user: {
@@ -102,7 +104,7 @@ app.post("/api/v1/signin", (req, res) => __awaiter(void 0, void 0, void 0, funct
         const token = jsonwebtoken_1.default.sign({ userId: user.id }, exports.JWT_SECRET, {
             expiresIn: "1h",
         });
-        res.json({
+        res.status(200).json({
             token,
             user: {
                 id: user.id,
@@ -176,6 +178,12 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
     });
     if (user) {
         const lamports = yield connection.getBalance(new web3_js_2.PublicKey(user.publicKey));
+        if (lamports == 0) {
+            res.status(202).json({
+                message: "No Funds to Withdraw"
+            });
+            return;
+        }
         // 5k lamports is the fees of a transfer transaction
         const lamportsAfterfees = lamports - 5000;
         if (all) {
@@ -189,9 +197,10 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
             yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transactionWidthdrawAll, [
                 keypair,
             ]);
-            res.status(200).json({ message: "The whole wallet if empty" });
+            res.status(200).json({ message: "Withdrew entire wallet balance" });
             return;
         }
+        // When all is false and a specific amount is provided
         const transactionWidthdraw = new web3_js_1.Transaction().add(web3_js_1.SystemProgram.transfer({
             fromPubkey: new web3_js_2.PublicKey(user.publicKey),
             toPubkey: new web3_js_2.PublicKey(address),
@@ -199,23 +208,41 @@ app.post("/api/v1/widthdraw", middleware_1.authMiddleware, (req, res) => __await
         }));
         const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
         const keypair = web3_js_1.Keypair.fromSecretKey(secretKey);
+        console.log("transaction started ");
         yield (0, web3_js_1.sendAndConfirmTransaction)(connection, transactionWidthdraw, [
             keypair,
         ]);
-        res.status(200).json({ message: "withdrawl done !" });
+        console.log("transaction completed ");
+        // Added response for the partial withdrawal case
+        res.status(200).json({
+            message: "Partial withdrawal successful",
+            amount: amount
+        });
+        return;
     }
+    res.status(404).json({ message: "user not found" });
 }));
-app.post("/api/v1/getPrice", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+app.post("/api/v1/getPrice", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const token_address = req.body.token_address;
     const price = yield axios_1.default.get(`https://api.jup.ag/price/v2?ids=${token_address},So11111111111111111111111111111111111111112`);
-    const extra = yield axios_1.default.get(`https://tokens.jup.ag/token/${token_address}`);
-    const quoteResponse = yield fetch(`https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${1 * web3_js_2.LAMPORTS_PER_SOL}\&slippageBps=50`);
-    const data = yield quoteResponse.json();
-    res.status(200).json({
-        token_price: price.data.data[token_address],
-        quote: data,
-        extra_info: extra.data,
-    });
+    try {
+        const extra = yield axios_1.default.get(`https://tokens.jup.ag/token/${token_address}`);
+        res.status(200).json({
+            token_price: price.data.data[token_address],
+            // quote: data,
+            extra_info: extra.data,
+        });
+        return;
+    }
+    catch (error) {
+        res.status(303).json({ message: "Enter the correct Token address" });
+    }
+    // const quoteResponse = await fetch(
+    //   `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${
+    //     1 * LAMPORTS_PER_SOL
+    //   }\&slippageBps=50`
+    // );
+    // const data = await quoteResponse.json();
 }));
 app.post("/api/v1/buy", middleware_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const token_address = req.body.token_address;
@@ -286,4 +313,4 @@ app.post("/api/v1/health", middleware_1.authMiddleware, (req, res) => __awaiter(
         message: "healthy"
     });
 }));
-app.listen(3000);
+app.listen(5001);

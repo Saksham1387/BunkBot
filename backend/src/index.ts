@@ -21,13 +21,13 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import axios from "axios";
-
+import cors from "cors";
 export const prisma = new PrismaClient();
-const connection = new Connection('https://api.mainnet-beta.solana.com');
+const connection = new Connection("https://api.devnet.solana.com");
 
 const app = express();
 app.use(express.json());
-
+app.use(cors());
 export const JWT_SECRET = "secret";
 
 app.post("/api/v1/signup", async (req, res) => {
@@ -73,7 +73,7 @@ app.post("/api/v1/signup", async (req, res) => {
       expiresIn: "1h",
     });
 
-    res.status(201).json({
+    res.status(200).json({
       message: "User created successfully",
       token,
       user: {
@@ -112,7 +112,7 @@ app.post("/api/v1/signin", async (req, res) => {
       expiresIn: "1h",
     });
 
-    res.json({
+    res.status(200).json({
       token,
       user: {
         id: user.id,
@@ -186,9 +186,15 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
       id: userid,
     },
   });
+
   if (user) {
     const lamports = await connection.getBalance(new PublicKey(user.publicKey));
-
+    if (lamports == 0) {
+      res.status(202).json({
+        message: "No Funds to Withdraw",
+      });
+      return;
+    }
     // 5k lamports is the fees of a transfer transaction
     const lamportsAfterfees = lamports - 5000;
     if (all) {
@@ -205,9 +211,11 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
         keypair,
       ]);
 
-      res.status(200).json({ message: "The whole wallet if empty" });
+      res.status(200).json({ message: "Withdrew entire wallet balance" });
       return;
     }
+
+    // When all is false and a specific amount is provided
     const transactionWidthdraw = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: new PublicKey(user.publicKey),
@@ -217,40 +225,54 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
     );
     const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
     const keypair = Keypair.fromSecretKey(secretKey);
+    console.log("transaction started ");
     await sendAndConfirmTransaction(connection, transactionWidthdraw, [
       keypair,
     ]);
-    res.status(200).json({ message: "withdrawl done !" });
+    console.log("transaction completed ");
+
+    // Added response for the partial withdrawal case
+    res.status(200).json({
+      message: "Partial withdrawal successful",
+      amount: amount,
+    });
+    return;
   }
+
+  res.status(404).json({ message: "user not found" });
 });
 
-app.post("/api/v1/getPrice", authMiddleware, async (req, res) => {
+app.post("/api/v1/getPrice", async (req, res) => {
   const token_address = req.body.token_address;
 
   const price = await axios.get(
     `https://api.jup.ag/price/v2?ids=${token_address},So11111111111111111111111111111111111111112`
   );
-  const extra = await axios.get(`https://tokens.jup.ag/token/${token_address}`);
-  const quoteResponse = await fetch(
-    `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${
-      1 * LAMPORTS_PER_SOL
-    }\&slippageBps=50`
-  );
-  const data = await quoteResponse.json();
-  res.status(200).json({
-    token_price: price.data.data[token_address],
-    quote: data,
-    extra_info: extra.data,
-  });
+
+  try {
+    const extra = await axios.get(
+      `https://tokens.jup.ag/token/${token_address}`
+    );
+    res.status(200).json({
+      token_price: price.data.data[token_address],
+      // quote: data,
+      extra_info: extra.data,
+    });
+    return;
+  } catch (error) {
+    res.status(303).json({ message: "Enter the correct Token address" });
+  }
 });
 
 app.post("/api/v1/buy", authMiddleware, async (req, res) => {
   const token_address = req.body.token_address;
   const amount = req.body.amount;
   const finalAmount = amount * LAMPORTS_PER_SOL;
-  const quoteResponse = await (await fetch(
-    `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`
-  )).json()
+  const quoteResponse = await (
+    await fetch(
+      `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112\&outputMint=${token_address}\&amount=${finalAmount}\&slippageBps=50`
+    )
+  ).json();
   // const data = await quoteResponse.json();
   //@ts-ignore
   const userid = req.user.id;
@@ -259,13 +281,14 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
       id: userid,
     },
   });
-  if(!user){
-    res.status(404).json({message:"user not found"})
-    return
+  if (!user) {
+    res.status(404).json({ message: "user not found" });
+    return;
   }
   const secretKey = new Uint8Array(Buffer.from(user!.privateKey, "hex"));
   const keypair = Keypair.fromSecretKey(secretKey);
-  const {swapTransaction}  = await (await fetch("https://quote-api.jup.ag/v6/swap", {
+  const { swapTransaction } = await (
+    await fetch("https://quote-api.jup.ag/v6/swap", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -280,17 +303,17 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
         // feeAccount is optional. Use if you want to charge a fee.  feeBps must have been passed in /quote API.
         // feeAccount: "fee_account_public_key"
       }),
-    })).json()
-/// ---------------------------
-  const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
+    })
+  ).json();
+  /// ---------------------------
+  const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
   if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
-    console.error('Invalid swap transaction');
-    res.status(500).json({ error: 'Failed to process swap transaction' });
-    return 
+    console.error("Invalid swap transaction");
+    res.status(500).json({ error: "Failed to process swap transaction" });
+    return;
   }
   var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
   console.log(transaction);
-
 
   transaction.sign([keypair]);
   const latestBlockHash = await connection.getLatestBlockhash();
@@ -299,7 +322,7 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
     skipPreflight: true,
     maxRetries: 2,
   });
-  console.log("Awaiting for trnsaciton confirm")
+  console.log("Awaiting for trnsaciton confirm");
   connection.confirmTransaction({
     blockhash: latestBlockHash.blockhash,
     lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
@@ -309,15 +332,15 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
 
   res.status(200).json({
     message: "Transaction initiated",
-    tsxid:txid,
-    url:`https://solscan.io/tx/${txid}`
+    tsxid: txid,
+    url: `https://solscan.io/tx/${txid}`,
   });
 });
 
 app.post("/api/v1/health", authMiddleware, async (req, res) => {
- res.status(200).json({
-  message:"healthy"
- })
+  res.status(200).json({
+    message: "healthy",
+  });
 });
 
-app.listen(3000);
+app.listen(5001);
