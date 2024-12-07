@@ -2,7 +2,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getWallet, getSeedAction } from "@/app/utils/api";
+import { getWallet, getSeedAction } from "@/lib/api";
 import { NavBar } from "./nav-bar";
 import { Copy, X } from "lucide-react";
 import { Label } from "./ui/label";
