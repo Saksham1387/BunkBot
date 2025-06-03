@@ -15,7 +15,7 @@ export const authMiddleware = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       //@ts-ignore
       where: { id: decoded.userId },
-      select: { id: true, username: true, publicKey: true },
+      select: { id: true, username: true },
     });
 
     if (!user) {

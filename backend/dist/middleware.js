@@ -27,7 +27,7 @@ const authMiddleware = (req, res, next) => __awaiter(void 0, void 0, void 0, fun
         const user = yield _1.prisma.user.findUnique({
             //@ts-ignore
             where: { id: decoded.userId },
-            select: { id: true, username: true, publicKey: true },
+            select: { id: true, username: true },
         });
         if (!user) {
             return res.status(401).json({ message: "User not found" });

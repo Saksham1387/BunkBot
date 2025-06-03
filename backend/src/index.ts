@@ -6,22 +6,18 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import express from "express";
+import nacl from "tweetnacl";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import axios from "axios";
+import cors from "cors";
 import { mnemonicToSeed } from "bip39";
 import { derivePath } from "ed25519-hd-key";
 import { PrismaClient } from "@prisma/client";
 import { generateMnemonic } from "bip39";
-import nacl from "tweetnacl";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcryptjs";
 import { authMiddleware } from "./middleware";
-import {
-  clusterApiUrl,
-  Connection,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-} from "@solana/web3.js";
-import axios from "axios";
-import cors from "cors";
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+
 export const prisma = new PrismaClient();
 const connection = new Connection("https://api.mainnet-beta.solana.com");
 
@@ -55,22 +51,28 @@ app.post("/api/v1/signup", async (req, res) => {
     const derivedSeed = derivePath(path, seed.toString("hex")).key;
     const secret = nacl.sign.keyPair.fromSeed(derivedSeed).secretKey;
     const keypair = Keypair.fromSecretKey(secret);
-    // console.log(keypair);
     const publicKey = keypair.publicKey.toBase58();
     const privateKey = Buffer.from(keypair.secretKey).toString("hex");
     const user = await prisma.user.create({
       data: {
         username,
         password: hashedPassword,
-        publicKey,
-        privateKey,
         mnemonic,
       },
-      select: { id: true, username: true, publicKey: true },
+      select: { id: true, username: true },
     });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
       expiresIn: "1h",
+    });
+
+    const account = await prisma.account.create({
+      data: {
+        publicKey,
+        privateKey,
+        name: `account-${user.username}`,
+        userId: user.id,
+      },
     });
 
     res.status(200).json({
@@ -79,7 +81,7 @@ app.post("/api/v1/signup", async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        publicKey: user.publicKey,
+        account: account.name,
       },
     });
   } catch (error) {
@@ -87,6 +89,67 @@ app.post("/api/v1/signup", async (req, res) => {
     res.status(500).json({
       message: "Failed to create user",
     });
+  }
+});
+
+app.post("/api/v1/create-account", authMiddleware, async (req, res) => {
+  const { accountName } = req.body;
+  try {
+    //@ts-ignore
+    const userid = req.user.id;
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userid,
+      },
+      include: {
+        accounts: true, // Include wallets to count them
+      },
+    });
+    if (!user) {
+      res.status(401).json({
+        message: "User not found",
+      });
+    }
+
+    const walletIndex = user?.accounts.length;
+    const mnemonic = user?.mnemonic;
+    const seed = await mnemonicToSeed(mnemonic!);
+    const path = `m/44'/501'/${walletIndex}'/0'`;
+    const derivedSeed = derivePath(path, seed.toString("hex")).key;
+    const secret = nacl.sign.keyPair.fromSeed(derivedSeed).secretKey;
+    const keypair = Keypair.fromSecretKey(secret);
+    const publicKey = keypair.publicKey.toBase58();
+    const privateKey = Buffer.from(keypair.secretKey).toString("hex");
+    console.log(privateKey);
+    console
+    const existingAccount = await prisma.account.findUnique({
+      where: { publicKey },
+    });
+    
+    if (!existingAccount) {
+      const account = await prisma.account.create({
+        data: {
+          publicKey,
+          privateKey,
+          name: accountName,
+          userId: userid,
+          // Other fields
+        },
+      });
+      console.log("Account created:", account);
+      res.status(200).json({
+        message: "Successfully created account",
+        account,
+      });
+    } else {
+      console.log("Account already exists:", existingAccount);
+      res.status(500).json({
+        message: "Failed to create user",
+      });
+    }
+
+  } catch (error) {
+    console.error("Signup error:", error);
   }
 });
 
@@ -106,6 +169,7 @@ app.post("/api/v1/signin", async (req, res) => {
 
     if (!isMatch) {
       res.status(400).json({ message: "Invalid credentials" });
+      return
     }
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
@@ -117,28 +181,31 @@ app.post("/api/v1/signin", async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        publicKey: user.publicKey,
       },
     });
+    return 
   } catch (error) {
     console.error("Sign-in error:", error);
     res.status(500).json({ message: "Server error during sign-in" });
+    return 
   }
 });
 
 app.get("/api/v1/wallet", authMiddleware, async (req, res) => {
   //@ts-ignore
   const userid = req.user.id;
-  const user = await prisma.user.findUnique({
+  const account = await prisma.account.findFirst({
     where: {
-      id: userid,
+      userId: userid,
     },
   });
-  if (user) {
-    const balance = await connection.getBalance(new PublicKey(user.publicKey));
+  if (account) {
+    const balance = await connection.getBalance(
+      new PublicKey(account.publicKey)
+    );
     res.status(200).json({
-      publicKey: user.publicKey,
-      privateKey: user.privateKey,
+      publicKey: account.publicKey,
+      privateKey: account.privateKey,
       balance: balance / LAMPORTS_PER_SOL,
     });
     return;
@@ -168,7 +235,7 @@ app.get("/api/v1/seedPhrase", authMiddleware, async (req, res) => {
 });
 
 app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
-  const { all, amount, address } = req.body;
+  const { all, amount, address, accountName } = req.body;
   if (all === undefined) {
     res.status(400).json({ message: "Please specify 'all' parameter" });
     return;
@@ -181,14 +248,24 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
   }
   //@ts-ignore
   const userid = req.user.id;
-  const user = await prisma.user.findUnique({
+
+  const user1 = await prisma.user.findUnique({
     where: {
       id: userid,
     },
   });
 
-  if (user) {
-    const lamports = await connection.getBalance(new PublicKey(user.publicKey));
+  const account = await prisma.account.findUnique({
+    where: {
+      userId: user1?.id,
+      name: accountName,
+    },
+  });
+
+  if (account) {
+    const lamports = await connection.getBalance(
+      new PublicKey(account.publicKey)
+    );
     if (lamports == 0) {
       res.status(202).json({
         message: "No Funds to Withdraw",
@@ -200,12 +277,12 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
     if (all) {
       const transactionWidthdrawAll = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: new PublicKey(user.publicKey),
+          fromPubkey: new PublicKey(account.publicKey),
           toPubkey: new PublicKey(address),
           lamports: lamportsAfterfees,
         })
       );
-      const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
+      const secretKey = new Uint8Array(Buffer.from(account.privateKey, "hex"));
       const keypair = Keypair.fromSecretKey(secretKey);
       await sendAndConfirmTransaction(connection, transactionWidthdrawAll, [
         keypair,
@@ -218,12 +295,12 @@ app.post("/api/v1/widthdraw", authMiddleware, async (req, res) => {
     // When all is false and a specific amount is provided
     const transactionWidthdraw = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: new PublicKey(user.publicKey),
+        fromPubkey: new PublicKey(account.publicKey),
         toPubkey: new PublicKey(address),
         lamports: amount * LAMPORTS_PER_SOL,
       })
     );
-    const secretKey = new Uint8Array(Buffer.from(user.privateKey, "hex"));
+    const secretKey = new Uint8Array(Buffer.from(account.privateKey, "hex"));
     const keypair = Keypair.fromSecretKey(secretKey);
     console.log("transaction started ");
     await sendAndConfirmTransaction(connection, transactionWidthdraw, [
@@ -284,10 +361,14 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
 
     if (!user) {
       res.status(404).json({ message: "user not found" });
-      return 
+      return
     }
-
-    const secretKey = new Uint8Array(Buffer.from(user!.privateKey, "hex"));
+    const account = await prisma.account.findFirst({
+      where: {
+        userId: userid,
+      },
+    });
+    const secretKey = new Uint8Array(Buffer.from(account!.privateKey, "hex"));
     const keypair = Keypair.fromSecretKey(secretKey);
     const { swapTransaction } = await (
       await fetch("https://quote-api.jup.ag/v6/swap", {
@@ -297,7 +378,7 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
         },
         body: JSON.stringify({
           quoteResponse,
-          userPublicKey: user?.publicKey.toString(),
+          userPublicKey: account?.publicKey.toString(),
           wrapAndUnwrapSol: true,
         }),
       })
@@ -306,7 +387,7 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
     const swapTransactionBuf = Buffer.from(swapTransaction, "base64");
     if (!swapTransactionBuf || swapTransactionBuf.length === 0) {
       res.status(500).json({ error: "Failed to process swap transaction" });
-      return 
+      return
     }
 
     var transaction = VersionedTransaction.deserialize(swapTransactionBuf);
@@ -319,20 +400,19 @@ app.post("/api/v1/buy", authMiddleware, async (req, res) => {
     });
 
     const url = `https://solscan.io/tx/${txid}`;
-    
+
     res.status(200).json({
       message: "Transaction initiated",
       txid: txid,
       url: url,
     });
-    return 
+    return
   } catch (error) {
     console.error("Error in buy endpoint:", error);
     res.status(500).json({ error: "An unexpected error occurred" });
-    return 
+    return
   }
 });
-
 
 app.get("/api/v1/health", async (req, res) => {
   res.status(200).json({
