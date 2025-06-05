@@ -24,7 +24,7 @@ const connection = new Connection("https://api.mainnet-beta.solana.com");
 const app = express();
 app.use(express.json());
 app.use(cors({
-  origin: 'https://bonk.saksham.social',
+  origin: 'https://bonk.saksham.social/auth',
   credentials: true // if using cookies/sessions
 }));
 export const JWT_SECRET = "secret";
